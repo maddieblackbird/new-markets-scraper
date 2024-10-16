@@ -326,6 +326,7 @@ def scrape_emails_and_platforms_from_website(url, max_links=5):
     visited_links = set()  # Track visited links to avoid duplicates
     pos_systems = set()
     reservation_platforms = set()
+    reservation_links = set()
 
     # Define patterns for POS systems and reservation platforms
     pos_patterns = {
@@ -375,6 +376,14 @@ def scrape_emails_and_platforms_from_website(url, max_links=5):
                 reservation_platforms.add(name)
                 print(f"Found reservation platform '{name}' on main page.")
 
+        # Collect reservation links
+        for link in soup.find_all('a', href=True):
+            href = link['href']
+            for name, pattern in reservation_patterns.items():
+                if pattern.search(href):
+                    reservation_links.add(href)
+                    print(f"Found reservation link '{href}' for platform '{name}'.")
+
         visited_links.add(url_normalized)
         # Check for links to other pages and scrape them up to max_links
         links_scraped = 1
@@ -415,23 +424,32 @@ def scrape_emails_and_platforms_from_website(url, max_links=5):
                             reservation_platforms.add(name)
                             print(f"Found reservation platform '{name}' on page {absolute_link}.")
 
+                    # Collect reservation links
+                    for a_tag in link_soup.find_all('a', href=True):
+                        link_href = a_tag['href']
+                        for name, pattern in reservation_patterns.items():
+                            if pattern.search(link_href):
+                                reservation_links.add(link_href)
+                                print(f"Found reservation link '{link_href}' for platform '{name}' on page {absolute_link}.")
+
                     visited_links.add(absolute_link_normalized)
                     links_scraped += 1
                     time.sleep(1)  # Be polite and avoid overwhelming the server
                 except requests.RequestException:
                     continue
 
-        return emails, pos_systems, reservation_platforms
+        return emails, pos_systems, reservation_platforms, reservation_links
 
     except requests.RequestException as e:
         print(f"Error scraping {url}: {e}")
-        return emails, pos_systems, reservation_platforms
+        return emails, pos_systems, reservation_platforms, reservation_links
 
 def update_with_emails_and_platforms(df, max_websites=50):
     print("\nStarting to extract emails and platforms from restaurant websites.")
     emails_list = []
     pos_list = []
     reservation_list = []
+    reservation_links_list = []
     processed_websites = set()  # Track processed websites
     websites_processed_count = 0  # Counter for unique websites processed
     for index, row in df.iterrows():
@@ -442,6 +460,7 @@ def update_with_emails_and_platforms(df, max_websites=50):
             emails_list.extend([None] * remaining)
             pos_list.extend([None] * remaining)
             reservation_list.extend([None] * remaining)
+            reservation_links_list.extend([None] * remaining)
             break
         print(f"\nProcessing restaurant {index + 1}/{len(df)}: {row['Name']}")
         website = row['Website']
@@ -452,30 +471,43 @@ def update_with_emails_and_platforms(df, max_websites=50):
                 emails_list.append(None)
                 pos_list.append(None)
                 reservation_list.append(None)
+                reservation_links_list.append(None)
                 continue
-            emails, pos_systems, reservation_platforms = scrape_emails_and_platforms_from_website(website)
+            emails, pos_systems, reservation_platforms, reservation_links = scrape_emails_and_platforms_from_website(website)
             emails_list.append(', '.join(emails) if emails else None)
             pos_list.append(', '.join(pos_systems) if pos_systems else None)
             reservation_list.append(', '.join(reservation_platforms) if reservation_platforms else None)
+            reservation_links_list.append(', '.join(reservation_links) if reservation_links else None)
             print(f"Extracted emails from {website}: {emails}")
             print(f"Detected POS systems: {pos_systems}")
             print(f"Detected reservation platforms: {reservation_platforms}")
+            print(f"Collected reservation links: {reservation_links}")
             processed_websites.add(website_normalized)
             websites_processed_count += 1
         else:
             emails_list.append(None)
             pos_list.append(None)
             reservation_list.append(None)
+            reservation_links_list.append(None)
             print(f"No website URL for {row['Name']}")
     df['Emails'] = emails_list
     df['POS Systems'] = pos_list
     df['Reservation Platforms'] = reservation_list
+    df['Reservation Links'] = reservation_links_list
     print("Finished extracting emails and platforms.")
     return df
 
 def save_to_csv(df, filename='restaurants.csv'):
     df.to_csv(filename, index=False)
     print(f"\nData saved to {filename}")
+
+def save_hubspot_upload_csv(df, filename='restaurants_hubspot_upload.csv'):
+    # Split the 'Emails' column into multiple rows
+    df_exploded = df.copy()
+    df_exploded['Emails'] = df_exploded['Emails'].str.split(', ')
+    df_exploded = df_exploded.explode('Emails')
+    df_exploded.to_csv(filename, index=False)
+    print(f"\nData saved to {filename} with one email per row.")
 
 def main():
     # Eater URLs
@@ -509,6 +541,9 @@ def main():
 
     # Save to CSV
     save_to_csv(combined_df)
+
+    # Create the additional CSV file with one email per row
+    save_hubspot_upload_csv(combined_df)
 
 if __name__ == "__main__":
     main()
