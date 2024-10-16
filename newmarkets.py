@@ -13,7 +13,7 @@ def normalize_url(url):
     url = url.lower()        # Convert to lowercase
     return url
 
-def get_eater_links(start_url, max_articles=50):
+def get_eater_links(start_url, max_articles=5):  # Limit to 5 articles for testing
     print(f"Starting to crawl Eater URLs from {start_url}")
     visited = set()
     to_visit = [start_url]
@@ -131,7 +131,7 @@ def extract_eater_restaurants(url, processed_urls):
         print(f"Error extracting from {url}: {e}")
         return []
 
-def get_infatuation_links(start_url):
+def get_infatuation_links(start_url, max_articles=5):  # Limit to 5 articles for testing
     print(f"\nStarting to crawl The Infatuation URLs from {start_url}")
     visited = set()
     to_visit = [start_url]
@@ -140,6 +140,9 @@ def get_infatuation_links(start_url):
     desired_prefix = 'https://www.theinfatuation.com/dallas/guides'
 
     while to_visit:
+        if len(infatuation_urls) >= max_articles:
+            print(f"Reached the maximum number of articles ({max_articles}). Stopping crawl.")
+            break
         url = to_visit.pop()
         url_normalized = normalize_url(url)
         print(f"Processing URL: {url}")
@@ -257,11 +260,72 @@ def combine_and_deduplicate(eater_data, infatuation_data):
     return combined_df
 
 def extract_emails(text):
-    """Extract and return email addresses from text."""
-    pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
-    return set(re.findall(pattern, text))
+    """Extract and return valid email addresses from text."""
+    # Improved regex pattern with word boundaries and negative lookaheads/lookbehinds
+    pattern = r'(?<![\w.-])'          # Negative lookbehind to ensure the email is not preceded by a word character
+    pattern += r'[\w\.-]+@[\w\.-]+\.\w{2,}'
+    pattern += r'(?![\w.-])'          # Negative lookahead to ensure the email is not followed by a word character
+    emails = set(re.findall(pattern, text))
 
-def scrape_emails_from_website(url, max_links=10):
+    # Filter emails using additional validation
+    valid_emails = set()
+    for email in emails:
+        email = email.strip().strip('.,;:"\'<>[](){}')  # Remove surrounding punctuation
+        if is_valid_email(email):
+            valid_emails.add(email)
+    return valid_emails
+
+def is_valid_email(email):
+    """Validate email addresses based on custom rules."""
+    # Exclude emails with unwanted domains
+    unwanted_domains = [
+        'domain.com', 'latofonts.com', 'wixpress.com', 'example.com',
+        'yourdomain.com', 'placeholder.com', 'email.com', 'sentry.wixpress.com'
+    ]
+    # Exclude emails with unwanted prefixes
+    unwanted_prefixes = [
+        'user@', 'team@', 'info@mysite.com', 'noreply@', 'no-reply@',
+        'support@', 'admin@', 'webmaster@', 'contact@yourdomain.com'
+    ]
+
+    email_lower = email.lower()
+    domain = email_lower.split('@')[-1]
+
+    # Check for unwanted domains
+    if domain in unwanted_domains:
+        return False
+
+    # Check for unwanted prefixes
+    for prefix in unwanted_prefixes:
+        if email_lower.startswith(prefix):
+            return False
+
+    # Exclude emails that are too long or too short
+    if len(email) > 254 or len(email) < 5:
+        return False
+
+    # Exclude emails that contain non-ASCII characters
+    try:
+        email.encode('ascii')
+    except UnicodeEncodeError:
+        return False
+
+    # Exclude emails that contain consecutive digits (e.g., phone numbers)
+    if re.search(r'\d{5,}', email):  # Five or more consecutive digits
+        return False
+
+    # Exclude emails that are concatenated with phone numbers or other numbers
+    if re.search(r'\d{3,}[^\w]*' + re.escape(email), text):
+        return False
+
+    # Basic email format validation
+    email_regex = r'^[A-Za-z0-9\._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
+    if not re.match(email_regex, email):
+        return False
+
+    return True
+
+def scrape_emails_from_website(url, max_links=5):
     emails = set()
     visited_links = set()  # Track visited links to avoid duplicates
     print(f"\nScraping emails from website: {url}")
@@ -310,11 +374,17 @@ def scrape_emails_from_website(url, max_links=10):
         print(f"Error scraping {url}: {e}")
         return emails
 
-def update_with_emails(df):
+def update_with_emails(df, max_websites=50):
     print("\nStarting to extract emails from restaurant websites.")
     emails_list = []
     processed_websites = set()  # Track processed websites
+    websites_processed_count = 0  # Counter for unique websites processed
     for index, row in df.iterrows():
+        if websites_processed_count >= max_websites:
+            print(f"Reached the maximum number of websites ({max_websites}). Stopping email extraction.")
+            # Append None for the remaining restaurants
+            emails_list.extend([None] * (len(df) - len(emails_list)))
+            break
         print(f"\nProcessing restaurant {index + 1}/{len(df)}: {row['Name']}")
         website = row['Website']
         if pd.notnull(website):
@@ -327,6 +397,7 @@ def update_with_emails(df):
             emails_list.append(', '.join(emails) if emails else None)
             print(f"Extracted emails from {website}: {emails}")
             processed_websites.add(website_normalized)
+            websites_processed_count += 1
         else:
             emails_list.append(None)
             print(f"No website URL for {row['Name']}")
@@ -342,7 +413,7 @@ def main():
     # Eater URLs
     eater_start_url = 'https://dallas.eater.com/'
     print("Starting to process Eater data.")
-    eater_links = get_eater_links(eater_start_url, max_articles=50)
+    eater_links = get_eater_links(eater_start_url, max_articles=5)  # Limit to 5 articles for testing
     eater_restaurants = []
     processed_urls = set()
     for link in eater_links:
@@ -354,7 +425,7 @@ def main():
     # Infatuation URLs
     infatuation_start_url = 'https://www.theinfatuation.com/dallas/guides'
     print("\nStarting to process The Infatuation data.")
-    infatuation_links = get_infatuation_links(infatuation_start_url)
+    infatuation_links = get_infatuation_links(infatuation_start_url, max_articles=5)  # Limit to 5 articles for testing
     infatuation_restaurants = []
     for link in infatuation_links:
         infatuation_restaurants.extend(extract_infatuation_restaurants(link, processed_urls))
@@ -365,8 +436,8 @@ def main():
     # Combine and deduplicate
     combined_df = combine_and_deduplicate(eater_restaurants, infatuation_restaurants)
 
-    # Extract emails
-    combined_df = update_with_emails(combined_df)
+    # Extract emails (limited to 50 unique restaurant websites)
+    combined_df = update_with_emails(combined_df, max_websites=50)
 
     # Save to CSV
     save_to_csv(combined_df)
