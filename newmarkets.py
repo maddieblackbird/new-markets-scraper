@@ -278,7 +278,6 @@ def extract_emails(text):
                 valid_emails.add(email)
     return valid_emails
 
-
 def is_valid_email(email):
     """Validate email addresses based on custom rules."""
     # Exclude emails with unwanted domains
@@ -322,21 +321,59 @@ def is_valid_email(email):
 
     return True
 
-
-def scrape_emails_from_website(url, max_links=5):
+def scrape_emails_and_platforms_from_website(url, max_links=5):
     emails = set()
     visited_links = set()  # Track visited links to avoid duplicates
-    print(f"\nScraping emails from website: {url}")
+    pos_systems = set()
+    reservation_platforms = set()
+
+    # Define patterns for POS systems and reservation platforms
+    pos_patterns = {
+        'Toast': re.compile(r'toasttab\.com'),
+        'Square': re.compile(r'squareup\.com|square\.site'),
+        'Clover': re.compile(r'clover\.com'),
+        'ShopKeep': re.compile(r'shopkeep\.com'),
+        'Revel Systems': re.compile(r'revelsystems\.com'),
+        'Upserve': re.compile(r'upserve\.com'),
+        'TouchBistro': re.compile(r'touchbistro\.com'),
+        'Lightspeed': re.compile(r'lightspeedhq\.com'),
+        # Add more POS systems as needed
+    }
+
+    reservation_patterns = {
+        'OpenTable': re.compile(r'opentable\.com'),
+        'Resy': re.compile(r'resy\.com'),
+        'Tock': re.compile(r'exploretock\.com'),
+        'Yelp Reservations': re.compile(r'yelp\.com/reservations'),
+        'SevenRooms': re.compile(r'sevenrooms\.com'),
+        # Add more reservation platforms as needed
+    }
+
+    print(f"\nScraping emails and platforms from website: {url}")
     try:
         url_normalized = normalize_url(url)
         response = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, 'html.parser')
         text = soup.get_text()
+        html_content = response.text
+
+        # Extract emails
         new_emails = extract_emails(text)
         emails.update(new_emails)
         if new_emails:
             print(f"Found emails on main page: {new_emails}")
+
+        # Search for POS systems and reservation platforms in HTML content
+        for name, pattern in pos_patterns.items():
+            if pattern.search(html_content):
+                pos_systems.add(name)
+                print(f"Found POS system '{name}' on main page.")
+
+        for name, pattern in reservation_patterns.items():
+            if pattern.search(html_content):
+                reservation_platforms.add(name)
+                print(f"Found reservation platform '{name}' on main page.")
 
         visited_links.add(url_normalized)
         # Check for links to other pages and scrape them up to max_links
@@ -358,32 +395,53 @@ def scrape_emails_from_website(url, max_links=5):
                     link_response = requests.get(absolute_link, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
                     link_response.raise_for_status()
                     link_text = link_response.text
-                    new_emails = extract_emails(link_text)
+                    link_soup = BeautifulSoup(link_response.content, 'html.parser')
+                    link_text_content = link_soup.get_text()
+
+                    # Extract emails
+                    new_emails = extract_emails(link_text_content)
                     if new_emails:
                         emails.update(new_emails)
                         print(f"Found emails on page {absolute_link}: {new_emails}")
+
+                    # Search for POS systems and reservation platforms
+                    for name, pattern in pos_patterns.items():
+                        if pattern.search(link_text):
+                            pos_systems.add(name)
+                            print(f"Found POS system '{name}' on page {absolute_link}.")
+
+                    for name, pattern in reservation_patterns.items():
+                        if pattern.search(link_text):
+                            reservation_platforms.add(name)
+                            print(f"Found reservation platform '{name}' on page {absolute_link}.")
+
                     visited_links.add(absolute_link_normalized)
                     links_scraped += 1
                     time.sleep(1)  # Be polite and avoid overwhelming the server
                 except requests.RequestException:
                     continue
 
-        return emails
+        return emails, pos_systems, reservation_platforms
 
     except requests.RequestException as e:
         print(f"Error scraping {url}: {e}")
-        return emails
+        return emails, pos_systems, reservation_platforms
 
-def update_with_emails(df, max_websites=50):
-    print("\nStarting to extract emails from restaurant websites.")
+def update_with_emails_and_platforms(df, max_websites=50):
+    print("\nStarting to extract emails and platforms from restaurant websites.")
     emails_list = []
+    pos_list = []
+    reservation_list = []
     processed_websites = set()  # Track processed websites
     websites_processed_count = 0  # Counter for unique websites processed
     for index, row in df.iterrows():
         if websites_processed_count >= max_websites:
-            print(f"Reached the maximum number of websites ({max_websites}). Stopping email extraction.")
+            print(f"Reached the maximum number of websites ({max_websites}). Stopping extraction.")
             # Append None for the remaining restaurants
-            emails_list.extend([None] * (len(df) - len(emails_list)))
+            remaining = len(df) - len(emails_list)
+            emails_list.extend([None] * remaining)
+            pos_list.extend([None] * remaining)
+            reservation_list.extend([None] * remaining)
             break
         print(f"\nProcessing restaurant {index + 1}/{len(df)}: {row['Name']}")
         website = row['Website']
@@ -392,17 +450,27 @@ def update_with_emails(df, max_websites=50):
             if website_normalized in processed_websites:
                 print(f"Website already processed: {website}")
                 emails_list.append(None)
+                pos_list.append(None)
+                reservation_list.append(None)
                 continue
-            emails = scrape_emails_from_website(website)
+            emails, pos_systems, reservation_platforms = scrape_emails_and_platforms_from_website(website)
             emails_list.append(', '.join(emails) if emails else None)
+            pos_list.append(', '.join(pos_systems) if pos_systems else None)
+            reservation_list.append(', '.join(reservation_platforms) if reservation_platforms else None)
             print(f"Extracted emails from {website}: {emails}")
+            print(f"Detected POS systems: {pos_systems}")
+            print(f"Detected reservation platforms: {reservation_platforms}")
             processed_websites.add(website_normalized)
             websites_processed_count += 1
         else:
             emails_list.append(None)
+            pos_list.append(None)
+            reservation_list.append(None)
             print(f"No website URL for {row['Name']}")
     df['Emails'] = emails_list
-    print("Finished extracting emails.")
+    df['POS Systems'] = pos_list
+    df['Reservation Platforms'] = reservation_list
+    print("Finished extracting emails and platforms.")
     return df
 
 def save_to_csv(df, filename='restaurants.csv'):
@@ -436,8 +504,8 @@ def main():
     # Combine and deduplicate
     combined_df = combine_and_deduplicate(eater_restaurants, infatuation_restaurants)
 
-    # Extract emails (limited to 50 unique restaurant websites)
-    combined_df = update_with_emails(combined_df, max_websites=50)
+    # Extract emails and platforms (limited to 50 unique restaurant websites)
+    combined_df = update_with_emails_and_platforms(combined_df, max_websites=50)
 
     # Save to CSV
     save_to_csv(combined_df)
