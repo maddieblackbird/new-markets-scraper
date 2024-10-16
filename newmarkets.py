@@ -261,15 +261,23 @@ def combine_and_deduplicate(eater_data, infatuation_data):
 
 def extract_emails(text):
     """Extract and return valid email addresses from text."""
-    # Simplified regex pattern to match email addresses within any text
-    pattern = r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
-    raw_emails = re.findall(pattern, text)
+    # Use regex to find all potential emails within the text
+    # This pattern matches sequences containing '@', allowing preceding and following characters
+    potential_emails = re.findall(r'\S+@\S+', text)
+
     valid_emails = set()
-    for email in raw_emails:
-        email = email.strip('.,;:"\'<>[](){}')  # Remove surrounding punctuation
-        if is_valid_email(email):
-            valid_emails.add(email)
+    for email in potential_emails:
+        # Clean up the email by removing any non-email characters at the start and end
+        email = re.sub(r'^[^\w]+', '', email)  # Remove non-word characters at the start
+        email = re.sub(r'[^\w]+$', '', email)  # Remove non-word characters at the end
+        # Extract the actual email from any concatenated text
+        match = re.search(r'[\w\.-]+@[\w\.-]+\.\w{2,}', email)
+        if match:
+            email = match.group(0)
+            if is_valid_email(email):
+                valid_emails.add(email)
     return valid_emails
+
 
 def is_valid_email(email):
     """Validate email addresses based on custom rules."""
@@ -280,7 +288,8 @@ def is_valid_email(email):
     ]
     # Exclude emails with unwanted prefixes
     unwanted_prefixes = [
-        'user@', 'team@', 'info@mysite.com', 'noreply@', 'no-reply@', 'support@', 'admin@', 'webmaster@'
+        'user@', 'team@', 'info@mysite.com', 'noreply@', 'no-reply@',
+        'support@', 'admin@', 'webmaster@', 'test@', 'example@'
     ]
 
     email_lower = email.lower()
@@ -291,22 +300,19 @@ def is_valid_email(email):
         return False
 
     # Check for unwanted prefixes
-    for prefix in unwanted_prefixes:
-        if email_lower.startswith(prefix):
-            return False
+    if any(email_lower.startswith(prefix) for prefix in unwanted_prefixes):
+        return False
 
     # Exclude emails that are too long or too short
-    if len(email) > 254 or len(email) < 5:
+    if not (5 <= len(email) <= 254):
         return False
 
-    # Exclude emails that contain non-ASCII characters
-    try:
-        email.encode('ascii')
-    except UnicodeEncodeError:
+    # Exclude emails with non-ASCII characters
+    if not all(ord(c) < 128 for c in email):
         return False
 
-    # Exclude emails that contain consecutive digits (e.g., phone numbers)
-    if re.search(r'\d{5,}', email):  # Five or more consecutive digits
+    # Exclude emails with consecutive digits (e.g., phone numbers)
+    if re.search(r'\d{5,}', email):
         return False
 
     # Basic email format validation
@@ -315,6 +321,7 @@ def is_valid_email(email):
         return False
 
     return True
+
 
 def scrape_emails_from_website(url, max_links=5):
     emails = set()
