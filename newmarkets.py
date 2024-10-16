@@ -131,7 +131,7 @@ def extract_eater_restaurants(url, processed_urls):
         print(f"Error extracting from {url}: {e}")
         return []
 
-def get_infatuation_links(start_url, max_articles=5):  # Limit to 5 articles for testing
+def get_infatuation_links(start_url, max_articles=5):
     print(f"\nStarting to crawl The Infatuation URLs from {start_url}")
     visited = set()
     to_visit = [start_url]
@@ -261,16 +261,12 @@ def combine_and_deduplicate(eater_data, infatuation_data):
 
 def extract_emails(text):
     """Extract and return valid email addresses from text."""
-    # Improved regex pattern with word boundaries and negative lookaheads/lookbehinds
-    pattern = r'(?<![\w.-])'          # Negative lookbehind to ensure the email is not preceded by a word character
-    pattern += r'[\w\.-]+@[\w\.-]+\.\w{2,}'
-    pattern += r'(?![\w.-])'          # Negative lookahead to ensure the email is not followed by a word character
-    emails = set(re.findall(pattern, text))
-
-    # Filter emails using additional validation
+    # Simplified regex pattern to match email addresses within any text
+    pattern = r'[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+    raw_emails = re.findall(pattern, text)
     valid_emails = set()
-    for email in emails:
-        email = email.strip().strip('.,;:"\'<>[](){}')  # Remove surrounding punctuation
+    for email in raw_emails:
+        email = email.strip('.,;:"\'<>[](){}')  # Remove surrounding punctuation
         if is_valid_email(email):
             valid_emails.add(email)
     return valid_emails
@@ -280,12 +276,11 @@ def is_valid_email(email):
     # Exclude emails with unwanted domains
     unwanted_domains = [
         'domain.com', 'latofonts.com', 'wixpress.com', 'example.com',
-        'yourdomain.com', 'placeholder.com', 'email.com', 'sentry.wixpress.com'
+        'yourdomain.com', 'placeholder.com', 'email.com', 'sentry.wixpress.com', 'sentry-next.wixpress.com'
     ]
     # Exclude emails with unwanted prefixes
     unwanted_prefixes = [
-        'user@', 'team@', 'info@mysite.com', 'noreply@', 'no-reply@',
-        'support@', 'admin@', 'webmaster@', 'contact@yourdomain.com'
+        'user@', 'team@', 'info@mysite.com', 'noreply@', 'no-reply@', 'support@', 'admin@', 'webmaster@'
     ]
 
     email_lower = email.lower()
@@ -314,12 +309,8 @@ def is_valid_email(email):
     if re.search(r'\d{5,}', email):  # Five or more consecutive digits
         return False
 
-    # Exclude emails that are concatenated with phone numbers or other numbers
-    if re.search(r'\d{3,}[^\w]*' + re.escape(email), text):
-        return False
-
     # Basic email format validation
-    email_regex = r'^[A-Za-z0-9\._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
+    email_regex = r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
     if not re.match(email_regex, email):
         return False
 
@@ -358,7 +349,9 @@ def scrape_emails_from_website(url, max_links=5):
             if parsed_link.netloc == urlparse(url_normalized).netloc and absolute_link_normalized not in visited_links:
                 try:
                     link_response = requests.get(absolute_link, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
-                    new_emails = extract_emails(link_response.text)
+                    link_response.raise_for_status()
+                    link_text = link_response.text
+                    new_emails = extract_emails(link_text)
                     if new_emails:
                         emails.update(new_emails)
                         print(f"Found emails on page {absolute_link}: {new_emails}")
